@@ -1,0 +1,1262 @@
+version: 2.1
+orbs:
+  slack: circleci/slack@4.1
+  aws-cli: circleci/aws-cli@2.0.6
+
+
+parameters:
+  start_main_workflow:
+    default: true
+    type: boolean
+  start_dev_workflow:
+    default: false
+    type: boolean
+  start_r_workflow:
+    default: false
+    type: boolean
+  image_tag:
+    default: default_tag
+    type: string
+  start_AT_workflow:
+    default: false
+    type: boolean
+  start_deploy_workflow:
+    default: false
+    type: boolean
+
+commands:
+  choosing_the_right_workflow_to_trigger:
+    steps:
+      - run:
+          name: "choosing the workflow to run"
+          command: |
+                if [ "$CIRCLE_BRANCH" = "development" ] && [ "$CIRCLE_PULL_REQUEST" != "" ]
+                then
+                  echo "Installing Dependencies..."
+                  apt update -y
+                  apt install jq -y
+                  apt install curl -y
+                  echo $(jq --version)
+                  echo $(curl --version)
+                  echo "Installed required Dependencies"
+                  echo "Starting release workflow"
+                  # we call github api for the specific PR
+                  mystring=${CIRCLE_PULL_REQUEST}
+                  PR_NUMBER=$(echo $mystring | awk -F/ '{ print $NF }')
+                  echo "the pr number is ${PR_NUMBER}"
+                  GIT_URL="https://api.github.com/repos/nvg14/pipeline/pulls/${PR_NUMBER}"
+                  curl -X GET -u sundar-ka:${GITHUB_TOKEN} ${GIT_URL} > PR.json
+                  
+                  BASE_BRANCH=$(jq '.base.ref' PR.json)
+                  BASE_BRANCH=$(echo $BASE_BRANCH | cut -d '"' -f 2)
+                  
+                  HEAD_BRANCH=$(jq '.head.ref' PR.json)
+                  HEAD_BRANCH=$(echo $HEAD_BRANCH | cut -d '"' -f 2)
+            
+                  if [[ $BASE_BRANCH == "main"  && $HEAD_BRANCH == "development" ]]
+                  then
+                    echo "Triggering Release pipeline"
+
+                    curl -X POST https://circleci.com/api/v2/project/gh/nvg14/pipeline/pipeline \
+                      --header 'Content-Type: application/json' \
+                      --header 'Accept: application/json' \
+                      --header "Circle-Token: $user_token" \
+                      --data '{"branch":"development","parameters":{"start_r_workflow":true,"start_main_workflow":false,"image_tag":"release-latest"}}'
+
+                  else
+                    echo "Release pipeline cannot be triggered"    
+                  fi  
+
+                elif [ "$CIRCLE_BRANCH" = "development" ] && [ "$CIRCLE_PULL_REQUEST" = "" ]
+                then
+                  echo "Installing Dependencies..."
+                  apt update -y
+                  apt install jq -y
+                  apt install curl -y
+                  echo $(jq --version)
+                  echo $(curl --version)
+                  echo "Installed required Dependencies"
+                  echo "Starting dev workflow" 
+                  curl -X POST https://circleci.com/api/v2/project/gh/nvg14/pipeline/pipeline \
+                  --header 'Content-Type: application/json' \
+                  --header 'Accept: application/json' \
+                  --header "Circle-Token: $user_token" \
+                  --data '{"branch":"development","parameters":{"start_dev_workflow":true,"start_main_workflow":false,"image_tag":"dev-latest"}}'
+                else
+                  echo "No workflow to trigger"
+                fi       
+
+  build_and_push_docker:
+    steps:
+      - run: 
+          name: build and push docker into ECR
+          command: |
+                docker build -t myapp .
+                IMAGE_TAG=<< pipeline.parameters.image_tag >>
+                echo "Image tag is $IMAGE_TAG"
+                echo "printing aws version "
+                echo $(aws --version)
+                docker tag myapp $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
+                echo "Logging in to Amazon ECR..."
+                aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+                echo "Pushing the Docker image..."
+                docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
+                echo "pushed successfully"    
+          
+
+workflows:
+
+  Main pipeline: 
+    when: << pipeline.parameters.start_main_workflow >>
+    jobs: 
+      - Trigger Job
+      
+  Release Pipeline:
+    when: << pipeline.parameters.start_r_workflow >>
+    jobs:
+      - Build:
+          context: aws
+          filters:
+            branches:
+              only: development
+      - Run Backend Automation Test Cases:
+          requires:
+            - Build
+      - Deploy to Test Environment:
+          requires:
+            - Run Backend Automation Test Cases
+      - QA Team Approval:
+          type: approval
+          requires:
+            - Deploy to Test Environment
+      - Deploy to Staging Environment:
+          requires:
+            - QA Team Approval
+      - Product Team Approval:
+          type: approval
+          requires:
+            - Deploy to Staging Environment
+      - Deploy to Production Environment:
+          requires:
+            - Product Team Approval
+
+  Development Pipeline:
+    when: << pipeline.parameters.start_dev_workflow >>
+    jobs:
+      - Build:
+          context: aws
+      - Automated Test: 
+          requires:
+            - Build
+      - Development Deployment:
+          requires:
+            - Automated Test
+
+  Automated Test Cases Pipeline:
+    when: << pipeline.parameters.start_AT_workflow >>
+    jobs:
+      - Approval for Automated Test
+      - Approve Automated Test: 
+          type: approval
+          requires:
+            - Approval for Automated Test
+      - Run Backend Automation Test Cases:
+          requires:
+            - Approve Automated Test
+
+  Code Deploy in development:
+    when: << pipeline.parameters.start_deploy_workflow >>
+    jobs:
+      - Deploy to Backend Development Environment
+
+jobs:
+  Trigger Job:
+    docker:
+      - image: ubuntu:focal
+    steps:
+      - checkout
+      - run:
+          command: echo "It's Trigger job"
+      - choosing_the_right_workflow_to_trigger     
+          
+  Build:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - setup_remote_docker
+      - aws-cli/install
+      - build_and_push_docker
+      - run:
+          name: "Creating and uploading helm chart"
+          command: "echo creating anf uploading helm chart"
+      - slack/notify:
+          event: fail
+          mentions: "<@Nithin V Gopal>"
+          channel: "temp-stv-application-team"
+          custom: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Hello*, $SLACK_PARAM_MENTIONS"
+                  }
+                },
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "New Candidate Failed :red_circle:",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\nDevelopment"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*URL:*\n https://obelix-automation.stv.amagi.tv/"
+                    }
+                  ],
+                  "accessory": {
+                    "type": "image",
+                    "image_url": "https://via.placeholder.com/1920x1080/FFF/000/?text=Failed",
+                    "alt_text": "cute cat"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "View Job"
+                      },
+                      "style": "danger",
+                      "value": "click_me_123",
+                      "url": "${CIRCLE_BUILD_URL}"
+                    }
+                  ]
+                }
+              ]
+            }
+            
+  Automated Test:
+    docker:
+      - image: ubuntu:focal
+    steps:
+      - checkout
+      - run: |
+          echo "Installing Dependencies..."
+          apt update -y
+          apt install jq -y
+          apt install curl -y
+          echo $(jq --version)
+          echo $(curl --version) # 2943a0e4-23e5-4821-9c74-c5e0cb5d2706
+          echo "Installed required Dependencies"
+
+          echo "Starting Automated test workflow" 
+          curl -X POST https://circleci.com/api/v2/project/gh/nvg14/pipeline/pipeline \
+           --header 'Content-Type: application/json' \
+           --header 'Accept: application/json' \
+           --header "Circle-Token: $user_token" \
+           --data '{"branch":"development","parameters":{"start_AT_workflow":true,"start_main_workflow":false}}' > pipeline.json
+          
+          count=1
+          sleep 10s
+          while [ $count -eq 1 ]
+          do
+              echo "doing api call to pipeline and work flow to check status..."
+              cat pipeline.json
+              pipeline_id=$(jq '.id' pipeline.json)
+              pipeline_id=$(echo $pipeline_id | cut -d '"' -f 2)
+
+              echo "pipeline id getting is ${pipeline_id}"
+              echo "starting to sleep"
+              sleep 6s
+              echo "sleeping done calling API for workflows of a pipeline"
+              curl -X GET https://circleci.com/api/v2/pipeline/$pipeline_id/workflow \
+               --header 'Accept: application/json' \
+               --header "Circle-Token: $user_token"  > workflows.json
+
+              cat workflows.json
+              workflow_id=$(jq '.items[] | .id' workflows.json)
+              echo "printing the required workflow id "
+              workflow_id=$(echo $workflow_id | cut -d '"' -f 2)
+              echo "workflow id we get is ${workflow_id}"
+              echo "storing output in result variable"
+              curl -X GET https://circleci.com/api/v2/workflow/$workflow_id \
+                --header 'Accept: application/json' \
+                --header "Circle-Token: $user_token"  > myworkflow.json
+              result=$(jq '.status' myworkflow.json)
+              result=$(echo $result | cut -d '"' -f 2)
+              echo "result value is ${result}"
+              if [ $result = pending ]
+              then
+                echo "Flow is still in running state..."
+                sleep 60s
+              elif [ $result = failed ]
+              then
+                echo "Automated test failed."
+                break
+              elif [ $result = success ] || [ $result = canceled ]
+              then
+                echo "Automated test $result"
+                break
+              fi
+          done
+
+          
+
+      - slack/notify:
+          event: fail
+          mentions: "<@Nithin V Gopal>"
+          channel: "temp-stv-application-team"
+          custom: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Hello*, $SLACK_PARAM_MENTIONS"
+                  }
+                },
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "New Candidate Failed :red_circle:",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\nDevelopment"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*URL:*\n https://obelix-automation.stv.amagi.tv/"
+                    }
+                  ],
+                  "accessory": {
+                    "type": "image",
+                    "image_url": "https://via.placeholder.com/1920x1080/FFF/000/?text=Failed",
+                    "alt_text": "cute cat"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "View Job"
+                      },
+                      "style": "danger",
+                      "value": "click_me_123",
+                      "url": "${CIRCLE_BUILD_URL}"
+                    }
+                  ]
+                }
+              ]
+            }
+
+  Development Deployment:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - run: |
+          sleep 60s
+          echo "Starting Automated test workflow" 
+          curl -X POST https://circleci.com/api/v2/project/gh/nvg14/pipeline/pipeline \
+           --header 'Content-Type: application/json' \
+           --header 'Accept: application/json' \
+           --header "Circle-Token: $user_token" \
+           --data '{"branch":"development","parameters":{"start_deploy_workflow":true,"start_main_workflow":false}}'
+      - slack/notify:
+          event: fail
+          mentions: "<@Nithin V Gopal>"
+          channel: "temp-stv-application-team"
+          custom: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Hello*, $SLACK_PARAM_MENTIONS"
+                  }
+                },
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "New Candidate Failed :red_circle:",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\nDevelopment"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*URL:*\n https://obelix-automation.stv.amagi.tv/"
+                    }
+                  ],
+                  "accessory": {
+                    "type": "image",
+                    "image_url": "https://via.placeholder.com/1920x1080/FFF/000/?text=Failed",
+                    "alt_text": "cute cat"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "View Job"
+                      },
+                      "style": "danger",
+                      "value": "click_me_123",
+                      "url": "${CIRCLE_BUILD_URL}"
+                    }
+                  ]
+                }
+              ]
+            }
+
+  Approval for Automated Test:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - run:
+         name: "Approval for Triggering Automated Test"
+         command: "echo Awaiting for the approval from dev team to trigger automated test"
+      - slack/notify:
+          event: pass
+          channel: "temp-stv-dev-team"
+          mentions: "<@Nithin V Gopal>"
+          custom: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Hello*, $SLACK_PARAM_MENTIONS"
+                  }
+                },
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "ON HOLD - Awaiting For Dev Approval :raised_hand:",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Type:*\nWaiting for approval from Development team to trigger Automated test"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Job:*\n $CIRCLE_JOB"
+                    }
+                  ],
+                  "accessory": {
+                    "type": "image",
+                    "image_url": "https://via.placeholder.com/1920x1080/FFF/000/?text=Pending",
+                    "alt_text": "cute cat"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "Approve"
+                      },
+                      "style": "primary",
+                      "value": "click_me_123",
+                      "url": "${CIRCLE_BUILD_URL}"
+                    },
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "Visit Website"
+                      },
+                      "style": "primary",
+                      "value": "click_me_123",
+                      "url": "https://test.stv.amagi.tv/"
+                    },
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "View Workflow"
+                      },
+                      "style": "danger",
+                      "value": "click_me_123",
+                      "url": "https://circleci.com/workflow-run/${CIRCLE_WORKFLOW_ID}"
+                    }
+                  ]
+                }
+              ]
+            }
+      - slack/notify:
+          event: fail
+          mentions: "<@Nithin V Gopal>"
+          channel: "temp-stv-application-team"
+          custom: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Hello*, $SLACK_PARAM_MENTIONS"
+                  }
+                },
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "New Candidate Failed :red_circle:",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\nDevelopment"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*URL:*\n https://obelix-automation.stv.amagi.tv/"
+                    }
+                  ],
+                  "accessory": {
+                    "type": "image",
+                    "image_url": "https://via.placeholder.com/1920x1080/FFF/000/?text=Failed",
+                    "alt_text": "cute cat"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "View Test Report"
+                      },
+                      "style": "danger",
+                      "value": "click_me_123",
+                      "url": "http://results.test.stv.amagi.tv/2022-01-06/test1/report.html"
+                    },
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "View Job"
+                      },
+                      "style": "danger",
+                      "value": "click_me_123",
+                      "url": "${CIRCLE_BUILD_URL}"
+                    }
+                  ]
+                }
+              ]
+            }
+
+  Run Backend Automation Test Cases:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      # - run:
+      #    name: "Failing a build"
+      #    command: "time.sleep"
+      - run:
+          name: "Deploy to obelix-automation.stv.amagi.tv"
+          command: "echo deploying the helm into automation environment"
+      - run:
+          name: "Pull the test cases"
+          command: "echo successfully ran the test cases"
+      - run:
+          name: "Validating the test cases"
+          command: "echo successfully validated the test cases"
+      - run: |
+          curl -X GET https://circleci.com/api/v2/workflow/$CIRCLE_WORKFLOW_ID \
+           --header 'Accept: application/json' \
+           --header "Circle-Token: $user_token"  > workflow.json 
+          echo "printing workflow details"
+          cat workflow.json    
+      - run:
+          name: "Echo param"
+          command: "echo export SLACK_PARAM_MENTIONS='<@$SLACK_USER_ID>' >> $BASH_ENV"
+      - slack/notify:
+          event: fail
+          mentions: "<@Nithin V Gopal>"
+          channel: "temp-stv-application-team"
+          custom: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Hello*, $SLACK_PARAM_MENTIONS"
+                  }
+                },
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "New Candidate Failed :red_circle:",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\nDevelopment"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*URL:*\n https://obelix-automation.stv.amagi.tv/"
+                    }
+                  ],
+                  "accessory": {
+                    "type": "image",
+                    "image_url": "https://via.placeholder.com/1920x1080/FFF/000/?text=Failed",
+                    "alt_text": "cute cat"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "View Test Report"
+                      },
+                      "style": "danger",
+                      "value": "click_me_123",
+                      "url": "http://results.test.stv.amagi.tv/2022-01-06/test1/report.html"
+                    },
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "View Job"
+                      },
+                      "style": "danger",
+                      "value": "click_me_123",
+                      "url": "${CIRCLE_BUILD_URL}"
+                    }
+                  ]
+                }
+              ]
+            }
+  Deploy to Backend Development Environment:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      #  - run:
+      #     name: "Failing a build"
+      #     command: "time.sleep"
+      - run:
+          name: "Deploy to obelix-automation.stv.amagi.tv"
+          command: "echo deploying the helm into automation environment"
+      - slack/notify:
+          event: pass
+          channel: "temp-stv-dev-team"
+          mentions: "<@Nithin V Gopal>"
+          custom: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Hello*, $SLACK_PARAM_MENTIONS"
+                  }
+                },
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "New Deployment Available :white_check_mark:",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\nDevelopment"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*URL:*\n https://obelix.dev.stv.amagi.tv/"
+                    }
+                  ],
+                  "accessory": {
+                    "type": "image",
+                    "image_url": "https://via.placeholder.com/1920x1080/FFF/000/?text=Live",
+                    "alt_text": "cute cat"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "API Document"
+                      },
+                      "style": "primary",
+                      "value": "click_me_123",
+                      "url": "https://obelix.dev.stv.amagi.tv/apipie"
+                    }
+                  ]
+                }
+              ]
+            }
+      - slack/notify:
+          event: fail
+          channel: "temp-stv-application-team"
+          mentions: "<@Nithin V Gopal>"
+          custom: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Hello*, $SLACK_PARAM_MENTIONS"
+                  }
+                },
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "New Candidate Failed :red_circle:",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\nDevelopment"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*URL:*\n https://obelix.dev.stv.amagi.tv/"
+                    }
+                  ],
+                  "accessory": {
+                    "type": "image",
+                    "image_url": "https://via.placeholder.com/1920x1080/FFF/000/?text=Failed",
+                    "alt_text": "cute cat"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "View Job"
+                      },
+                      "style": "danger",
+                      "value": "click_me_123",
+                      "url": "${CIRCLE_BUILD_URL}"
+                    }
+                  ]
+                }
+              ]
+            }
+  Deploy to Test Environment:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - run:
+          name: "Deploy to obelix.test.stv.amagi.tv"
+          command: "echo deploying the helm into test environment"
+      - slack/notify:
+          event: pass
+          channel: "temp-stv-qa-team"
+          mentions: "<@Nithin V Gopal>"
+          custom: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Hello*, $SLACK_PARAM_MENTIONS"
+                  }
+                },
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "ON HOLD - Awaiting For QA Approval :raised_hand:",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Type:*\nWaiting for approval from QA team"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Job:*\n $CIRCLE_JOB"
+                    }
+                  ],
+                  "accessory": {
+                    "type": "image",
+                    "image_url": "https://via.placeholder.com/1920x1080/FFF/000/?text=Pending",
+                    "alt_text": "cute cat"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "Approve"
+                      },
+                      "style": "primary",
+                      "value": "click_me_123",
+                      "url": "${CIRCLE_BUILD_URL}"
+                    },
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "Visit Website"
+                      },
+                      "style": "primary",
+                      "value": "click_me_123",
+                      "url": "https://test.stv.amagi.tv/"
+                    },
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "View Workflow"
+                      },
+                      "style": "danger",
+                      "value": "click_me_123",
+                      "url": "https://circleci.com/workflow-run/${CIRCLE_WORKFLOW_ID}"
+                    }
+                  ]
+                }
+              ]
+            }
+      - slack/notify:
+          event: fail
+          channel: "temp-stv-application-team"
+          mentions: "<@Nithin V Gopal>"
+          custom: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Hello*, $SLACK_PARAM_MENTIONS"
+                  }
+                },
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "New Candidate Failed :red_circle:",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\nTest"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*URL:*\n https://obelix.test.stv.amagi.tv/"
+                    }
+                  ],
+                  "accessory": {
+                    "type": "image",
+                    "image_url": "https://via.placeholder.com/1920x1080/FFF/000/?text=Failed",
+                    "alt_text": "cute cat"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "View Job"
+                      },
+                      "style": "danger",
+                      "value": "click_me_123",
+                      "url": "${CIRCLE_BUILD_URL}"
+                    }
+                  ]
+                }
+              ]
+            }
+  Deploy to Staging Environment:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - run:
+          name: "Deploy to obelix.staging.stv.amagi.tv"
+          command: "echo deploying the helm into staging environment"
+      - slack/notify:
+          event: pass
+          channel: "temp-stv-product-team"
+          mentions: "<@Nithin V Gopal>"
+          custom: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Hello*, $SLACK_PARAM_MENTIONS"
+                  }
+                },
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "ON HOLD - Awaiting For Product Approval :raised_hand:",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Type:*\nWaiting for approval from product team"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Job:*\n $CIRCLE_JOB"
+                    }
+                  ],
+                  "accessory": {
+                    "type": "image",
+                    "image_url": "https://via.placeholder.com/1920x1080/FFF/000/?text=Pending",
+                    "alt_text": "cute cat"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "Approve"
+                      },
+                      "style": "primary",
+                      "value": "click_me_123",
+                      "url": "${CIRCLE_BUILD_URL}"
+                    },
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "Visit Website"
+                      },
+                      "style": "primary",
+                      "value": "click_me_123",
+                      "url": "https://staging.stv.amagi.tv/"
+                    },
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "View Workflow"
+                      },
+                      "style": "danger",
+                      "value": "click_me_123",
+                      "url": "https://circleci.com/workflow-run/${CIRCLE_WORKFLOW_ID}"
+                    }
+                  ]
+                }
+              ]
+            }
+      - slack/notify:
+          event: fail
+          channel: "temp-stv-application-team"
+          mentions: "<@Nithin V Gopal>"
+          custom: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Hello*, $SLACK_PARAM_MENTIONS"
+                  }
+                },
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "New Candidate Failed :red_circle:",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\nStaging"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*URL:*\n https://obelix.staging.stv.amagi.tv/"
+                    }
+                  ],
+                  "accessory": {
+                    "type": "image",
+                    "image_url": "https://via.placeholder.com/1920x1080/FFF/000/?text=Failed",
+                    "alt_text": "cute cat"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "View Job"
+                      },
+                      "style": "danger",
+                      "value": "click_me_123",
+                      "url": "${CIRCLE_BUILD_URL}"
+                    }
+                  ]
+                }
+              ]
+            }
+  Deploy to Production Environment:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - run:
+          name: "Creating release tag based on central repo"
+          command: "echo created release tag v0.0.1"
+      - run:
+          name: "Deploy to amaginow.tv"
+          command: "echo deploying the helm into production environment"
+      - run:
+          name: "Update documentation with new release note"
+          command: "echo updated documentation with new release notes"
+      - slack/notify:
+          event: pass
+          channel: "temp-stv-application-team, temp-stv-dev-team, temp-stv-qa-team, temp-stv-product-team"
+          mentions: "<@Nithin V Gopal>"
+          custom: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Hello*, $SLACK_PARAM_MENTIONS"
+                  }
+                },
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "New Release Available :white_check_mark:",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\nProduction"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*URL:*\n https://amaginow.tv/"
+                    }
+                  ],
+                  "accessory": {
+                    "type": "image",
+                    "image_url": "https://via.placeholder.com/1920x1080/FFF/000/?text=Live",
+                    "alt_text": "cute cat"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "API Document"
+                      },
+                      "style": "primary",
+                      "value": "click_me_123",
+                      "url": "https://obelix.dev.stv.amagi.tv/apipie"
+                    },
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "Release Notes"
+                      },
+                      "style": "primary",
+                      "value": "click_me_123",
+                      "url": "https://stv-docs.amagiengg.io/releases/pre-releases/v0.1.0/"
+                    }
+                  ]
+                }
+              ]
+            }
+      - slack/notify:
+          event: fail
+          channel: "temp-stv-application-team"
+          mentions: "<@Nithin V Gopal>"
+          custom: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Hello*, $SLACK_PARAM_MENTIONS"
+                  }
+                },
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "New Candidate Failed :red_circle:",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\nDevelopment"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*URL:*\n https://amaginow.tv/"
+                    }
+                  ],
+                  "accessory": {
+                    "type": "image",
+                    "image_url": "https://via.placeholder.com/1920x1080/FFF/000/?text=Failed",
+                    "alt_text": "cute cat"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "emoji": true,
+                        "text": "View Job"
+                      },
+                      "style": "danger",
+                      "value": "click_me_123",
+                      "url": "${CIRCLE_BUILD_URL}"
+                    }
+                  ]
+                }
+              ]
+            }
