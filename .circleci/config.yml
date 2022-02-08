@@ -57,7 +57,7 @@ commands:
                   then
                     echo "Triggering Release pipeline"
 
-                    curl -X POST https://circleci.com/api/v2/project/gh/vivmishr/DemoRepoforCodebuild/pipeline \
+                    curl -X POST https://circleci.com/api/v2/project/vivmishr/DemoRepoforCodebuild/pipeline \
                       --header 'Content-Type: application/json' \
                       --header 'Accept: application/json' \
                       --header "Circle-Token: $user_token" \
@@ -77,7 +77,7 @@ commands:
                   echo $(curl --version)
                   echo "Installed required Dependencies"
                   echo "Starting dev workflow" 
-                  curl -X POST https://circleci.com/api/v2/project/gh/vivmishr/DemoRepoforCodebuild/pipeline \
+                  curl -X POST https://circleci.com/api/v2/project/vivmishr/DemoRepoforCodebuild/pipeline \
                   --header 'Content-Type: application/json' \
                   --header 'Accept: application/json' \
                   --header "Circle-Token: $user_token" \
