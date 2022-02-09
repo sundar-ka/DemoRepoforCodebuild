@@ -306,7 +306,7 @@ jobs:
               elif [ $result = failed ]
               then
                 echo "Automated test failed."
-                break
+                time.sleep
               elif [ $result = success ] || [ $result = canceled ]
               then
                 echo "Automated test $result"
