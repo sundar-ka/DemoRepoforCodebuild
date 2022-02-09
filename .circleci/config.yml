@@ -625,7 +625,7 @@ jobs:
              echo $AT_Key > storm.pem
              chmod 400 storm.pem
              commands="docker run -v /var/www/test:/app/results 190435077939.dkr.ecr.us-east-1.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1"
-             ssh -i storm.pem ubuntu@52.3.231.77 $commands
+             ssh -o StrictHostKeyChecking=no -p2323 ubuntu@52.3.231.77 $commands
              count=1
              sleep 10s
              curl http://results.test.stv.amagi.tv/$dates/$runname/report.html > report.html
