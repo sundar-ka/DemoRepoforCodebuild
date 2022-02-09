@@ -617,11 +617,24 @@ jobs:
           name: "Deploy to obelix-automation.stv.amagi.tv"
           command: "echo deploying the helm into automation environment"
       - run:
-          name: "Pull the test cases"
-          command: "echo successfully ran the test cases"
-      - run:
-          name: "Validating the test cases"
-          command: "echo successfully validated the test cases"
+          name: "Running and Validating the Automated test cases"
+          command: |
+             dates=$(date +%F)
+             epoch=$(date +%s)
+             runname=AT_$epoch
+             commands="docker run -v /var/www/test:/app/results 190435077939.dkr.ecr.us-east-1.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1"
+             ssh -i storm.pem ubuntu@52.3.231.77 $commands
+             count=1
+             sleep 10s
+             curl http://results.test.stv.amagi.tv/$dates/$runname/report.html > report.html
+             line=$(sed -n '/"fail":0,"label":"All Tests","pass":[0-9]*,"skip":0/p' report.html)
+             if [ "$line" != "" ]
+             then
+                     echo "Test success"
+             else
+                     echo "Test Failed"
+                     time.sleep
+             fi 
       - run: |
           curl -X GET https://circleci.com/api/v2/workflow/$CIRCLE_WORKFLOW_ID \
            --header 'Accept: application/json' \
