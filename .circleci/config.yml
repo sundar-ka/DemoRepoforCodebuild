@@ -627,13 +627,9 @@ jobs:
              epoch=$(date +%s)
              runname=AT_$epoch
              aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
-             docker run $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1
-             #echo $re
-             #rep=$(docker run $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix | cat /app/results/$dates/$runname/report.html)
-             echo $rep > report.html
+             res=$(docker run $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1)
+             echo $res > report.html
              sleep 10s
-             #curl http://results.test.stv.amagi.tv/$dates/$runname/report.html > report.html
-             #cat report.html
              line=$(sed -n '/"fail":0,"label":"All Tests","pass":[0-9]*,"skip":0/p' report.html)
              if [ "$line" != "" ]
              then
