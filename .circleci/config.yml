@@ -626,16 +626,14 @@ jobs:
              dates=$(date +%F)
              epoch=$(date +%s)
              runname=AT_$epoch
-             mkdir ./result
-             paths=$(pwd)
              aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
-             docker run -v $paths/result:/app/results $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1
-             docker run -v $paths/result:/app/results $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix cat /app/results/$dates/$runname/report.html
-             ls $paths/result
+             docker run $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1
+             rep=$(docker run $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix cat /app/results/$dates/$runname/report.html)
+             echo $rep > report.html
              sleep 10s
              #curl http://results.test.stv.amagi.tv/$dates/$runname/report.html > report.html
              #cat report.html
-             line=$(sed -n '/"fail":0,"label":"All Tests","pass":[0-9]*,"skip":0/p' $paths/result/$dates/$runname/report.html)
+             line=$(sed -n '/"fail":0,"label":"All Tests","pass":[0-9]*,"skip":0/p' report.html)
              if [ "$line" != "" ]
              then
                      echo "Test success"
