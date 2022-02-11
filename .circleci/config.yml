@@ -628,7 +628,7 @@ jobs:
              docker run -v /home:/app/results $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1
              
              sleep 10s
-             line=$(sed -n '/"fail":0,"label":"All Tests","pass":[0-9]*,"skip":0/p' /home/$date/$runname/report.html)
+             line=$(sed -n '/"fail":0,"label":"All Tests","pass":[0-9]*,"skip":0/p' /home/$dates/$runname/report.html)
              if [ "$line" != "" ]
              then
                      echo "Test success"
