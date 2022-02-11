@@ -614,9 +614,6 @@ jobs:
       - checkout
       - setup_remote_docker
       - aws-cli/install
-      # - run:
-      #    name: "Failing a build"
-      #    command: "time.sleep"
       - run:
           name: "Deploy to obelix-automation.stv.amagi.tv"
           command: "echo deploying the helm into automation environment"
@@ -627,7 +624,7 @@ jobs:
              epoch=$(date +%s)
              runname=AT_$epoch
              aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
-             res=$(docker run $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1)
+             res=$(docker run $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1,2,3,4,5,6)
              echo $res > report.html
              sleep 10s
              line=$(sed -n '/"fail":0,"label":"All Tests","pass":[0-9]*,"skip":0/p' report.html)
