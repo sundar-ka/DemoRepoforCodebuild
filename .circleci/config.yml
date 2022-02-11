@@ -630,6 +630,7 @@ jobs:
              paths=$(pwd)
              aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
              docker run -v $paths/result:/app/results $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1
+             docker run -v $paths/result:/app/results $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix cat /app/results/$dates/$runname/report.html
              ls $paths/result
              sleep 10s
              #curl http://results.test.stv.amagi.tv/$dates/$runname/report.html > report.html
