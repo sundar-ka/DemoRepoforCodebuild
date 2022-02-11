@@ -630,9 +630,9 @@ jobs:
              docker run -v /var/www/test:/app/results $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1
 
              sleep 10s
-             curl http://results.test.stv.amagi.tv/$dates/$runname/report.html > report.html
-             cat report.html
-             line=$(sed -n '/"fail":0,"label":"All Tests","pass":[0-9]*,"skip":0/p' report.html)
+             #curl http://results.test.stv.amagi.tv/$dates/$runname/report.html > report.html
+             #cat report.html
+             line=$(sed -n '/"fail":0,"label":"All Tests","pass":[0-9]*,"skip":0/p' /var/www/test/$dates/$runname/report.html)
              if [ "$line" != "" ]
              then
                      echo "Test success"
