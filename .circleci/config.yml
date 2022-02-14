@@ -632,6 +632,7 @@ jobs:
              EC2_PUBLIC_DNS=52.3.231.77
              ssh -o StrictHostKeyChecking=no $EC2_USERNAME@$EC2_PUBLIC_DNS \
              # other commands
+             pwd
              docker run -v /var/www/test:/app/results $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1
              # TODO Perform steps to deploy
               #docker run -v /home/circleci/project:/app/results/$dates/$runname $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1
