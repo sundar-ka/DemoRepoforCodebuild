@@ -624,16 +624,14 @@ jobs:
              epoch=$(date +%s)
              runname=AT_$epoch
              EC2_USERNAME=ubuntu
-             commands="docker run -v /var/www/test:/app/results $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1"
+             commands="docker run -v /var/www/test:/app/results $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1,2,3,4,5,6"
              EC2_PUBLIC_DNS=52.3.231.77
              ssh -o StrictHostKeyChecking=no $EC2_USERNAME@$EC2_PUBLIC_DNS $commands
              echo "Automated Test case success"
-             
              #sleep 10s
              #curl http://results.test.stv.amagi.tv/$dates/$runname/report.html > report.html
              #line=$(sed -n '/"fail":0,"label":"All Tests","pass":[0-9]*,"skip":0/p' /home/circleci/project/report.html)
              #if [ "$line" != "" ]
-
              #then
              #        echo "Test success"
              #else
