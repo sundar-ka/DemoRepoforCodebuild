@@ -44,7 +44,7 @@ commands:
                   mystring=${CIRCLE_PULL_REQUEST}
                   PR_NUMBER=$(echo $mystring | awk -F/ '{ print $NF }')
                   echo "the pr number is ${PR_NUMBER}"
-                  GIT_URL="https://api.github.com/repos/nvg14/pipeline/pulls/${PR_NUMBER}"
+                  GIT_URL="https://api.github.com/repos/vivmishr/DemoRepoforCodebuild/pulls/${PR_NUMBER}"
                   curl -X GET -u sundar-ka:${GITHUB_TOKEN} ${GIT_URL} > PR.json
                   
                   BASE_BRANCH=$(jq '.base.ref' PR.json)
@@ -57,7 +57,7 @@ commands:
                   then
                     echo "Triggering Release pipeline"
 
-                    curl -X POST https://circleci.com/api/v2/project/gh/nvg14/pipeline/pipeline \
+                    curl -X POST https://circleci.com/api/v2/project/gh/vivmishr/DemoRepoforCodebuild/pipeline \
                       --header 'Content-Type: application/json' \
                       --header 'Accept: application/json' \
                       --header "Circle-Token: $user_token" \
@@ -77,7 +77,7 @@ commands:
                   echo $(curl --version)
                   echo "Installed required Dependencies"
                   echo "Starting dev workflow" 
-                  curl -X POST https://circleci.com/api/v2/project/gh/nvg14/pipeline/pipeline \
+                  curl -X POST https://circleci.com/api/v2/project/gh/vivmishr/DemoRepoforCodebuild/pipeline \
                   --header 'Content-Type: application/json' \
                   --header 'Accept: application/json' \
                   --header "Circle-Token: $user_token" \
@@ -120,6 +120,7 @@ workflows:
             branches:
               only: development
       - Run Backend Automation Test Cases:
+          context: aws
           requires:
             - Build
       - Deploy to Test Environment:
@@ -161,6 +162,7 @@ workflows:
           requires:
             - Approval for Automated Test
       - Run Backend Automation Test Cases:
+          context: aws
           requires:
             - Approve Automated Test
 
@@ -264,7 +266,7 @@ jobs:
           echo "Installed required Dependencies"
 
           echo "Starting Automated test workflow" 
-          curl -X POST https://circleci.com/api/v2/project/gh/nvg14/pipeline/pipeline \
+          curl -X POST https://circleci.com/api/v2/project/gh/vivmishr/DemoRepoforCodebuild/pipeline \
            --header 'Content-Type: application/json' \
            --header 'Accept: application/json' \
            --header "Circle-Token: $user_token" \
@@ -306,7 +308,7 @@ jobs:
               elif [ $result = failed ]
               then
                 echo "Automated test failed."
-                break
+                time.sleep
               elif [ $result = success ] || [ $result = canceled ]
               then
                 echo "Automated test $result"
@@ -383,7 +385,7 @@ jobs:
       - run: |
           sleep 60s
           echo "Starting Automated test workflow" 
-          curl -X POST https://circleci.com/api/v2/project/gh/nvg14/pipeline/pipeline \
+          curl -X POST https://circleci.com/api/v2/project/gh/vivmishr/DemoRepoforCodebuild/pipeline \
            --header 'Content-Type: application/json' \
            --header 'Accept: application/json' \
            --header "Circle-Token: $user_token" \
@@ -610,18 +612,32 @@ jobs:
       - image: cimg/base:stable
     steps:
       - checkout
-      # - run:
-      #    name: "Failing a build"
-      #    command: "time.sleep"
+      - setup_remote_docker
+      - aws-cli/install
       - run:
           name: "Deploy to obelix-automation.stv.amagi.tv"
           command: "echo deploying the helm into automation environment"
       - run:
-          name: "Pull the test cases"
-          command: "echo successfully ran the test cases"
-      - run:
-          name: "Validating the test cases"
-          command: "echo successfully validated the test cases"
+          name: "Running and Validating the Automated test cases"
+          command: |
+             dates=$(date +%F)
+             epoch=$(date +%s)
+             runname=AT_$epoch
+             EC2_USERNAME=ubuntu
+             commands="docker run -v /var/www/test:/app/results $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1,2,3,4,5,6"
+             EC2_PUBLIC_DNS=52.3.231.77
+             ssh -o StrictHostKeyChecking=no $EC2_USERNAME@$EC2_PUBLIC_DNS $commands
+             echo "Automated Test case success"
+             #sleep 10s
+             #curl http://results.test.stv.amagi.tv/$dates/$runname/report.html > report.html
+             #line=$(sed -n '/"fail":0,"label":"All Tests","pass":[0-9]*,"skip":0/p' /home/circleci/project/report.html)
+             #if [ "$line" != "" ]
+             #then
+             #        echo "Test success"
+             #else
+             #        echo "Test Failed"
+             #        time.sleep
+             #fi 
       - run: |
           curl -X GET https://circleci.com/api/v2/workflow/$CIRCLE_WORKFLOW_ID \
            --header 'Accept: application/json' \
@@ -631,75 +647,7 @@ jobs:
       - run:
           name: "Echo param"
           command: "echo export SLACK_PARAM_MENTIONS='<@$SLACK_USER_ID>' >> $BASH_ENV"
-      - slack/notify:
-          event: fail
-          mentions: "<@Nithin V Gopal>"
-          channel: "temp-stv-application-team"
-          custom: |
-            {
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Hello*, $SLACK_PARAM_MENTIONS"
-                  }
-                },
-                {
-                  "type": "header",
-                  "text": {
-                    "type": "plain_text",
-                    "text": "New Candidate Failed :red_circle:",
-                    "emoji": true
-                  }
-                },
-                {
-                  "type": "section",
-                  "fields": [
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Environment:*\nDevelopment"
-                    },
-                    {
-                      "type": "mrkdwn",
-                      "text": "*URL:*\n https://obelix-automation.stv.amagi.tv/"
-                    }
-                  ],
-                  "accessory": {
-                    "type": "image",
-                    "image_url": "https://via.placeholder.com/1920x1080/FFF/000/?text=Failed",
-                    "alt_text": "cute cat"
-                  }
-                },
-                {
-                  "type": "actions",
-                  "elements": [
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "emoji": true,
-                        "text": "View Test Report"
-                      },
-                      "style": "danger",
-                      "value": "click_me_123",
-                      "url": "http://results.test.stv.amagi.tv/2022-01-06/test1/report.html"
-                    },
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "emoji": true,
-                        "text": "View Job"
-                      },
-                      "style": "danger",
-                      "value": "click_me_123",
-                      "url": "${CIRCLE_BUILD_URL}"
-                    }
-                  ]
-                }
-              ]
-            }
+
   Deploy to Backend Development Environment:
     docker:
       - image: cimg/base:stable
