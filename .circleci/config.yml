@@ -623,19 +623,12 @@ jobs:
              dates=$(date +%F)
              epoch=$(date +%s)
              runname=AT_$epoch
-             pwd
-             #aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
-             
              EC2_USERNAME=ubuntu
-             # TODO Change to your server's URL or public IP
              commands="docker run -v /var/www/test:/app/results $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1"
              EC2_PUBLIC_DNS=52.3.231.77
              ssh -o StrictHostKeyChecking=no $EC2_USERNAME@$EC2_PUBLIC_DNS $commands
-             
-             # TODO Perform steps to deploy
-              #docker run -v /home/circleci/project:/app/results/$dates/$runname $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1
-             
              sleep 10s
+             curl http://results.test.stv.amagi.tv/$dates/$runname/report.html > report.html
              line=$(sed -n '/"fail":0,"label":"All Tests","pass":[0-9]*,"skip":0/p' /home/circleci/project/report.html)
              if [ "$line" != "" ]
              then
