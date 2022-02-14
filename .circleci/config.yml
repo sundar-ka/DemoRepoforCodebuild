@@ -624,7 +624,7 @@ jobs:
              epoch=$(date +%s)
              runname=AT_$epoch
              EC2_USERNAME=ubuntu
-             commands="docker run -v /var/www/test:/app/results $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1"
+             commands="docker run -v /var/www/test:/app/results $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1,2,3,4,5,6"
              EC2_PUBLIC_DNS=52.3.231.77
              ssh -o StrictHostKeyChecking=no $EC2_USERNAME@$EC2_PUBLIC_DNS $commands
              sleep 10s
@@ -646,75 +646,7 @@ jobs:
       - run:
           name: "Echo param"
           command: "echo export SLACK_PARAM_MENTIONS='<@$SLACK_USER_ID>' >> $BASH_ENV"
-      - slack/notify:
-          event: fail
-          mentions: "<@Nithin V Gopal>"
-          channel: "temp-stv-application-team"
-          custom: |
-            {
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Hello*, $SLACK_PARAM_MENTIONS"
-                  }
-                },
-                {
-                  "type": "header",
-                  "text": {
-                    "type": "plain_text",
-                    "text": "New Candidate Failed :red_circle:",
-                    "emoji": true
-                  }
-                },
-                {
-                  "type": "section",
-                  "fields": [
-                    {
-                      "type": "mrkdwn",
-                      "text": "*Environment:*\nDevelopment"
-                    },
-                    {
-                      "type": "mrkdwn",
-                      "text": "*URL:*\n https://obelix-automation.stv.amagi.tv/"
-                    }
-                  ],
-                  "accessory": {
-                    "type": "image",
-                    "image_url": "https://via.placeholder.com/1920x1080/FFF/000/?text=Failed",
-                    "alt_text": "cute cat"
-                  }
-                },
-                {
-                  "type": "actions",
-                  "elements": [
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "emoji": true,
-                        "text": "View Test Report"
-                      },
-                      "style": "danger",
-                      "value": "click_me_123",
-                      "url": "http://results.test.stv.amagi.tv/2022-01-06/test1/report.html"
-                    },
-                    {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "emoji": true,
-                        "text": "View Job"
-                      },
-                      "style": "danger",
-                      "value": "click_me_123",
-                      "url": "${CIRCLE_BUILD_URL}"
-                    }
-                  ]
-                }
-              ]
-            }
+
   Deploy to Backend Development Environment:
     docker:
       - image: cimg/base:stable
