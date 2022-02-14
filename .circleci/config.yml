@@ -625,10 +625,10 @@ jobs:
              runname=AT_$epoch
              pwd
              aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
-             docker run -v /home/circleci/project:/app/results $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1
+             docker run -v /home/circleci/project:/app/results/$dates/$runname $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1
              
              sleep 10s
-             line=$(sed -n '/"fail":0,"label":"All Tests","pass":[0-9]*,"skip":0/p' /home/circleci/project/$dates/$runname/report.html)
+             line=$(sed -n '/"fail":0,"label":"All Tests","pass":[0-9]*,"skip":0/p' /home/circleci/project/report.html)
              if [ "$line" != "" ]
              then
                      echo "Test success"
