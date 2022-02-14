@@ -624,8 +624,19 @@ jobs:
              epoch=$(date +%s)
              runname=AT_$epoch
              pwd
-             aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
-             docker run -v /home/circleci/project:/app/results/$dates/$runname $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1
+             #aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+             
+             EC2_USERNAME=ubuntu
+             # TODO Change to your server's URL or public IP
+             EC2_PUBLIC_DNS=52.3.231.77
+             ssh -o StrictHostKeyChecking=no $EC2_USERNAME@$EC2_PUBLIC_DNS \
+             # other commands
+             # TODO Perform steps to deploy
+             docker run -v /var/www/test:/app/results $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1
+             # .
+             # .
+             # 8- Remove the ingress rule
+              #docker run -v /home/circleci/project:/app/results/$dates/$runname $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/stv-automatix /app/entrypoint.sh $runname 1
              
              sleep 10s
              line=$(sed -n '/"fail":0,"label":"All Tests","pass":[0-9]*,"skip":0/p' /home/circleci/project/report.html)
